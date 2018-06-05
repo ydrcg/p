@@ -1,0 +1,372 @@
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 1   
+
+
+C51 COMPILER V9.01, COMPILATION OF MODULE 串行通讯
+OBJECT MODULE PLACED IN 串行通讯.OBJ
+COMPILER INVOKED BY: H:\Keil\C51\BIN\C51.EXE 串行通讯.c DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          #include <at89x51.h>
+   2          #include <intrins.h>
+   3          
+   4          /*************************************************功能3所需变量*******************************************
+             -*************/
+   5          unsigned char ledCondition=0;                                                                           //控制8路LED灯显示效果
+   6          /**********************************************功能4和功能5所需变量***************************************
+             -*************/
+   7          unsigned char PWM_brightnessControl_count=0;                                            //记录中断次数
+   8          /*************************************************功能6所需变量*******************************************
+             -*************/
+   9          bit direc_flag=0;                                                                                       //占空比更新方向
+  10          double PWM_breathingLamp_count=0.0;                                                             //记录中断次数
+  11          double PWM_VLAUE=5.0;                                                                                           //占空比比对值
+  12          unsigned int HUXI_COUNT=0;                                                                              //占空比更新时间(记录中断次数)
+  13          /*************************************************功能7所需变量*******************************************
+             -*************/
+  14          unsigned char flag=0;
+  15          unsigned char temp=0;                                                                                           //临时变量
+  16          unsigned char comdata=0;
+  17          unsigned char temperature_data_H=0,temperature_data_L=0;                        //温度高8位与温度低8位
+  18          unsigned char temperature_data_H_temp=0,temperature_data_L_temp=0;      //校验用的温度高8位与温度低8位
+  19          unsigned char humidity_data_H=0,humidity_data_L=0;                                      //湿度高8位与湿度低8位
+  20          unsigned char humidity_data_H_temp=0,humidity_data_L_temp=0;            //校验用的湿度高8位与湿度低8位
+  21          unsigned char check_data_temp=0;                                                                        //校验用的校验8位
+  22          /***********************************************串行口通信所需变量****************************************
+             -*************/
+  23          unsigned char receiveData;                                                                                      //存放串口接收到的数据(即模块识别后的返回值)
+  24          
+  25          //功能：延时10微秒
+  26          void  Delay_10us(void)
+  27          {
+  28   1              unsigned char i;
+  29   1              i--;
+  30   1              i--;
+  31   1              i--;
+  32   1              i--;
+  33   1              i--;
+  34   1              i--;
+  35   1      }
+  36          
+  37          //功能：延时0.1毫秒
+  38          void Delay(unsigned int j)
+  39          {      
+  40   1              unsigned char i;
+  41   1              for(;j>0;j--)
+  42   1              {       
+  43   2                      for(i=0;i<27;i++);
+  44   2              }
+  45   1      }
+  46                                           
+  47          //串口发送函数
+  48          void sendCharData(unsigned char Data)
+  49          {
+  50   1              while(1)
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 2   
+
+  51   1              {
+  52   2                      if((RI==0)&&(TI==0))
+  53   2                      {
+  54   3                              SBUF=Data;
+  55   3                              break;
+  56   3                      }
+  57   2         }
+  58   1      }
+  59          
+  60          //定时器T1中断初始化函数
+  61          void timer1_init(void)
+  62          {               
+  63   1                                                                                      //定时器T1为工作方式2(自动重载初值的8位定时器)
+  64   1              TH1=0xfd;
+  65   1              TL1=0xfd;                                                                               //波特率9600bps(11.0592Mhz晶振)
+  66   1              TR1=1;                                                                                  //启动定时器T1,即启动波特率发生器                                       
+  67   1              SCON=0x50;                                                                              //定义串行口工作方式1,波特率9600bps,允许串口接收
+  68   1      //      SM0=0;                                                                                  //定义串行口工作方式1
+  69   1      //      SM1=1;
+  70   1      //      REN=1;                                                                                  //允许串口接收
+  71   1              EA=1;                                                                                   //开总中断
+  72   1              ES=1;                                                                                   //开串口中断
+  73   1      }
+  74          
+  75          //功能1：点亮LED灯 和 功能2：熄灭LED灯
+  76          void controlLed()
+  77          {       
+  78   1              while(receiveData==0x01)                                                //识别到人喊“开灯“,语音识别模块会从串口输出1,点亮LED灯
+  79   1              {                 
+  80   2                      P0=0x00;                                                                        //点亮全部LED灯
+  81   2              }
+  82   1              while(receiveData==0x02)                                                //识别到人喊“关灯“,语音识别模块会从串口输出2,熄灭LED灯
+  83   1              {                          
+  84   2                      P0=0xff;                                                                        //熄灭全部LED灯
+  85   2              }
+  86   1              P0=0xff;                                                                                //指令变化时,熄灭全部LED灯      
+  87   1      }
+  88          
+  89          //功能3：流水灯
+  90          void waterLamp(void)
+  91          {       
+  92   1              unsigned char i;                                                                        
+  93   1              while(receiveData==0x03)
+  94   1              {                                 
+  95   2                      ledCondition=0x7F;                                                      //LED灯初始化显示效果为 0111 1111
+  96   2                      for(i=0;i<8;i++)
+  97   2                      {
+  98   3                              P0=ledCondition;
+  99   3                              Delay(1000);                                                    //延时0.1s        
+ 100   3                              ledCondition=_cror_(ledCondition,1);    //循环右移 效果：0111 1111 -> 1011 1111
+ 101   3                              if(receiveData!=0x03)
+ 102   3                              {
+ 103   4                                      P0=0xff;                                                        //指令变化时,熄灭全部LED灯
+ 104   4                                      break;                                                                  
+ 105   4                              }       
+ 106   3                      }                                                 
+ 107   2              }
+ 108   1      }                       
+ 109          
+ 110          //功能4：LED灯较低亮度显示(一档亮度) 和 功能5：LED灯较高亮度显示(二档亮度)
+ 111          void brightnessControl(void)
+ 112          {
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 3   
+
+ 113   1              TMOD=0x21;                                                                              //维持定时器T1为工作方式1,设置定时器T0为工作方式1(M1=0,M0=1)
+ 114   1              if(receiveData==0x04)
+ 115   1              {                                                                               
+ 116   2                      TH0=0xff;                                                                       //高八位为(65536-10)/256
+ 117   2                      TL0=0xf7;                                                                       //低八位为(65536-10)%256,即初值为10个机器周期,定时约10.850684us
+ 118   2                      EA=1;                                                                           //开总中断
+ 119   2                      ET0=1;                                                                          //开定时器T0中断
+ 120   2                      TR0=1;                                                                          //启动定时器T0
+ 121   2                      while(receiveData==0x04);
+ 122   2                      TR0=0;                                                                          //关闭定时器T0
+ 123   2                      PWM_brightnessControl_count=0;                          //PWM_brightnessControl_count清零
+ 124   2                      P0=0xff;                                                                        //熄灭LED灯
+ 125   2              }
+ 126   1              if(receiveData==0x05)
+ 127   1              {
+ 128   2                      TH0=0xff;                                                                       //高八位为(65536-10)/256
+ 129   2                      TL0=0xf7;                                                                       //低八位为(65536-10)%256,即初值为10个机器周期,定时约10.850684us
+ 130   2                      EA=1;                                                                           //开总中断
+ 131   2                      ET0=1;                                                                          //开定时器T0中断
+ 132   2                      TR0=1;                                                                          //启动定时器T0
+ 133   2                      while(receiveData==0x05);                                       
+ 134   2                      TR0=0;                                                                          //关闭定时器T0
+ 135   2                      PWM_brightnessControl_count=0;                          //PWM_brightnessControl_count清零
+ 136   2                      P0=0xff;                                                                        //熄灭LED灯
+ 137   2              }
+ 138   1      }
+ 139          
+ 140          //功能6：呼吸灯
+ 141          void breathingLamp(void)
+ 142          {
+ 143   1              TMOD=0x22;                                                                              //维持定时器T1为工作方式1,设置定时器T0为工作方式2(M1=1,M0=0)
+ 144   1              TH0=0x47;                                                               //定时器溢出值设置,每隔200us发起一次中断
+ 145   1              TL0=0X47;
+ 146   1              TR0=1;                                                                  //定时器0开始计时
+ 147   1              ET0=1;                                                                  //开定时器0中断
+ 148   1              EA=1;                                                           //开总中断
+ 149   1              while(receiveData==0x06);                               
+ 150   1              TR0=0;                                                                                  //关闭定时器T0
+ 151   1              PWM_breathingLamp_count=0.0;                                    //计数清零
+ 152   1          HUXI_COUNT=0;
+ 153   1              P0=0xff;                                                                                //熄灭LED灯
+ 154   1      }
+ 155          
+ 156          //comdata操作
+ 157          void COM(void)                                                  
+ 158          {
+ 159   1              unsigned char i;
+ 160   1          for(i=0;i<8;i++)       
+ 161   1              {
+ 162   2                      flag=2; 
+ 163   2                      while((!P2_0)&&flag++);
+ 164   2                      Delay_10us();
+ 165   2                      Delay_10us();
+ 166   2                      Delay_10us();
+ 167   2                      temp=0;
+ 168   2                  if(P2_0)temp=1;
+ 169   2                      flag=2;
+ 170   2                      while((P2_0)&&flag++);
+ 171   2                      //超时则跳出for循环               
+ 172   2                      if(flag==1)break;
+ 173   2                      //判断数据位是0还是1                       
+ 174   2                      // 如果高电平高过预定0高电平值则数据位为 1               
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 4   
+
+ 175   2                      comdata<<=1;
+ 176   2                      comdata|=temp;        //0
+ 177   2              }
+ 178   1      }
+ 179          
+ 180          //功能7：读取并发送温湿度模块数据       
+ 181          void getTemperatureHumidity(void)
+ 182          {
+ 183   1              while(receiveData==0x07)
+ 184   1              {
+ 185   2                      //主机拉低18ms 
+ 186   2                  P2_0=0;
+ 187   2                      Delay(180);
+ 188   2                      P2_0=1;
+ 189   2                      //总线由上拉电阻拉高 主机延时20us
+ 190   2                      Delay_10us();
+ 191   2                      Delay_10us();
+ 192   2                      Delay_10us();
+ 193   2                      Delay_10us();
+ 194   2                      //主机设为输入 判断从机响应信号 
+ 195   2                      P2_0=1;
+ 196   2                      //判断从机是否有低电平响应信号 如不响应则跳出，响应则向下运行     
+ 197   2                      if(!P2_0)                //T !    
+ 198   2                      {
+ 199   3                              flag=2;
+ 200   3                              //判断从机是否发出 80us 的低电平响应信号是否结束         
+ 201   3                              while((!P2_0)&&flag++);
+ 202   3                              flag=2;
+ 203   3                              //判断从机是否发出 80us 的高电平，如发出则进入数据接收状态
+ 204   3                              while((P2_0)&&flag++);
+ 205   3                              //数据接收状态           
+ 206   3                              COM();
+ 207   3                              humidity_data_H_temp=comdata;
+ 208   3                              COM();
+ 209   3                              humidity_data_L_temp=comdata;
+ 210   3                              COM();
+ 211   3                              temperature_data_H_temp=comdata;
+ 212   3                              COM();
+ 213   3                              temperature_data_L_temp=comdata;
+ 214   3                              COM();
+ 215   3                              check_data_temp=comdata;
+ 216   3                              P2_0=1;
+ 217   3                              //数据校验 
+ 218   3                              temp=(temperature_data_H_temp+temperature_data_L_temp+humidity_data_H_temp+humidity_data_L_temp);
+ 219   3                              if(temp==check_data_temp)
+ 220   3                              {
+ 221   4                                      temperature_data_H=temperature_data_H_temp;
+ 222   4                                      temperature_data_L=temperature_data_L_temp;
+ 223   4                                      humidity_data_H=humidity_data_H_temp;
+ 224   4                                      humidity_data_L=humidity_data_L_temp;
+ 225   4      
+ 226   4                                      sendCharData(0xEE);                             //发送开始标志数0xEE
+ 227   4                                      Delay(10);                                                      //延时1ms
+ 228   4                                      sendCharData(temperature_data_H);       //发送温度高8位(整数部分)
+ 229   4                                      Delay(10);                                                      //延时1ms
+ 230   4                                      sendCharData(temperature_data_L);       //发送温度低8位(小数部分)
+ 231   4                                      Delay(10);                                                      //延时1ms
+ 232   4                                      sendCharData(humidity_data_H);          //发送湿度高8位(整数部分)
+ 233   4                                      Delay(10);                                                      //延时1ms
+ 234   4                                      sendCharData(humidity_data_L);          //发送湿度低8位(小数部分)
+ 235   4                                      Delay(10);                                                      //延时1ms
+ 236   4                                      sendCharData(0xFF);                             //发送结束标志数0xFF
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 5   
+
+ 237   4                                      Delay(10);                                                      //延时1ms
+ 238   4      
+ 239   4                                      receiveData=0x00;                                       //只读取一次温湿度数据
+ 240   4                              }
+ 241   3                      }
+ 242   2              }
+ 243   1      }
+ 244          
+ 245          void main(void)
+ 246          {       
+ 247   1              IP=0x10;                                                                                //设置串行口为高优先级中断,定时器T0为低优先级中断
+ 248   1              TMOD=0x21;                                                                              //默认定时器T0为工作方式1,定时器T1为工作方式2
+ 249   1              timer1_init();
+ 250   1              while(1)
+ 251   1              {       
+ 252   2                      controlLed();                                                           //功能1：点亮LED灯 和 功能2：熄灭LED灯
+ 253   2                      waterLamp();                                                            //功能3：流水灯
+ 254   2                      brightnessControl();                                            //功能4：LED灯较低亮度显示(一档亮度) 和 功能5：LED灯较高亮度显示(二档亮度)
+ 255   2                      breathingLamp();                                                        //功能6：呼吸灯
+ 256   2                      getTemperatureHumidity();                                       //功能7：读取并发送温湿度模块数据
+ 257   2              }
+ 258   1      }
+ 259          
+ 260          //串行口中断函数
+ 261          void serial() interrupt 4 
+ 262          {
+ 263   1              if(RI==1)                                                                               //如果是接收中断,进行下面工作
+ 264   1              {
+ 265   2                      receiveData=SBUF;                                                       //串口接收到的数据存放至变量receiveData
+ 266   2                      RI=0;                                                                           //接收中断标志位清零
+ 267   2                      SBUF=receiveData;                                                       
+ 268   2              }
+ 269   1              if(TI==1)                                                                               //如果是发送中断,进行下面工作
+ 270   1              {
+ 271   2                      TI=0;                                                                           //发送中断标志位清零
+ 272   2              }
+ 273   1      }
+ 274          
+ 275          //定时器T0中断函数
+ 276          void timer0() interrupt 1
+ 277          {
+ 278   1              if(receiveData==0x04)                                                   //LED灯较低亮度显示(一档亮度)
+ 279   1              {
+ 280   2                      TR0=0;                                                                          //赋初值定时,关闭定时器
+ 281   2                      TH0=0xff;                                                                       //高八位为(65536-10)/256
+ 282   2                      TL0=0xf7;                                                                       //低八位为(65536-10)%256,即10个机器周期,耗时约为10.850684us
+ 283   2                      TR0=1;                                                                          //打开定时器T0  
+ 284   2                      PWM_brightnessControl_count++;                          //每中断1次，PWM_brightnessControl_count加1
+ 285   2                      if(PWM_brightnessControl_count>=100)            //若执行完1轮PWM周期(中断100次，即1000个机器周期)
+ 286   2                              PWM_brightnessControl_count=0;          //PWM_brightnessControl_count清零，重新开始新一轮的PWM周期
+ 287   2                      if(PWM_brightnessControl_count<=90)             //在执行PWM周期的前90%的期间内
+ 288   2                              P0=0xFF;                                                        //送高电平,熄灭Led灯,占空比为90%
+ 289   2                      else                                                                            //在执行该轮PWM周期余下部分的期间内
+ 290   2                              P0=~P0;                                                                 //点亮LED灯
+ 291   2              }
+ 292   1              if(receiveData==0x05)                                                   //LED灯较高亮度显示(二档亮度)
+ 293   1              {
+ 294   2                      TR0=0;                                                                          //赋初值定时,关闭定时器
+ 295   2                      TH0=0xff;                                                                       //高八位为(65536-10)/256
+ 296   2                      TL0=0xf7;                                                                       //低八位为(65536-10)%256,即10个机器周期,耗时约为10.850684us
+ 297   2                      TR0=1;                                                                          //打开定时器T0  
+ 298   2                      PWM_brightnessControl_count++;                          //每中断1次，PWM_brightnessControl_count加1
+C51 COMPILER V9.01   串行通讯                                                              05/21/2018 02:02:06 PAGE 6   
+
+ 299   2                      if(PWM_brightnessControl_count>=100)            //若执行完1轮PWM周期(中断100次，即1000个机器周期)
+ 300   2                              PWM_brightnessControl_count=0;          //PWM_brightnessControl_count清零，重新开始新一轮的PWM周期
+ 301   2                      if(PWM_brightnessControl_count<=60)             //在执行PWM周期的前60%的期间内
+ 302   2                              P0=0xFF;                                                        //送高电平,熄灭Led灯,占空比为60%
+ 303   2                      else                                                                            //在执行该轮PWM周期余下部分的期间内
+ 304   2                              P0=~P0;                                                                 //点亮LED灯
+ 305   2              }
+ 306   1              if(receiveData==0x06)                                                   //呼吸灯
+ 307   1              {
+ 308   2                      PWM_breathingLamp_count+=0.25;
+ 309   2              HUXI_COUNT++;                                                           //定时器T0每中断1次,HUXI_COUNT就加1
+ 310   2                                                                                      
+ 311   2              if(PWM_breathingLamp_count==PWM_VLAUE)          //判断是否到了点亮LED的时候
+ 312   2                      P0=0x00;                                                //点亮LED灯
+ 313   2                  if(PWM_breathingLamp_count==10.0)                   //当前周期结束
+ 314   2                  {
+ 315   3                      P0=0xff;                                        //熄灭LED灯
+ 316   3                      PWM_breathingLamp_count=0.0;            //重新计时
+ 317   3                  }
+ 318   2      
+ 319   2                  if((HUXI_COUNT==100)&&(direc_flag==0))              //定时器T0每中断100次且direc_flag=0,占空比就更新一次
+ 320   2                  {                                                   
+ 321   3                      HUXI_COUNT=0.0;                                                 //占空比更新时间清零
+ 322   3                      PWM_VLAUE+=0.25;                                                //占空比增加2.5%
+ 323   3                      if(PWM_VLAUE==9.75)                             //若占空比为97.5%
+ 324   3                          direc_flag=~direc_flag;                     //占空比更改方向
+ 325   3                  }
+ 326   2                  if((HUXI_COUNT==100)&&(direc_flag==1))              //定时器T0每中断100次且direc_flag=1,占空比就更新一次
+ 327   2                  {                                                   
+ 328   3                      HUXI_COUNT=0.0;                                                 //占空比更新时间清零
+ 329   3                      PWM_VLAUE-=0.25;                                                //占空比减少2.5%
+ 330   3                      if(PWM_VLAUE==0.25)                             //若占空比为2.5%
+ 331   3                          direc_flag=~direc_flag;                     //占空比更改方向
+ 332   3                  }                                                   
+ 333   2              }                       
+ 334   1      }                         
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    880    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     25       1
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
